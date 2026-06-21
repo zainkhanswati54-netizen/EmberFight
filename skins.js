@@ -1,171 +1,171 @@
 /* ===================================================================
-   obstacles.js — the scrolling bar obstacles (this game's equivalent
-   of pipes), plus Ember-mode collectibles (sparks + surge gates).
-   Kept deliberately simple geometry per the brief: clean rectangular
-   bars with a warm rim-light edge, no decoration.
+   audio.js — tiny procedural sound engine using the WebAudio API.
+   No external sound files: every effect is synthesized on the fly,
+   which keeps the repo dependency-free and the sounds thematically
+   consistent (warm, low, "ember crackle" feel rather than bleepy
+   arcade tones).
 =================================================================== */
 
-class ObstaclePair {
-  constructor(x, gapCenterY, gapHeight, width) {
-    this.x = x;
-    this.width = width;
-    this.gapCenterY = gapCenterY;
-    this.gapHeight = gapHeight;
-    this.passed = false;
-    this.markedForRemoval = false;
+const Audio_ = (() => {
+  let ctx = null;
+  let masterGain = null;
+  let enabled = true;
+  let unlocked = false;
 
-    this.spark = null;
-    this.isSurgeGate = false;
+  function ensureContext() {
+    if (ctx) return ctx;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    ctx = new AC();
+    masterGain = ctx.createGain();
+    masterGain.gain.value = 0.55;
+    masterGain.connect(ctx.destination);
+    return ctx;
   }
 
-  get topRect() {
-    return { x: this.x, y: 0, w: this.width, h: this.gapCenterY - this.gapHeight / 2 };
+  function unlock() {
+    if (unlocked) return;
+    const c = ensureContext();
+    if (!c) return;
+    if (c.state === 'suspended') c.resume();
+    unlocked = true;
   }
 
-  get bottomRect() {
-    const groundY = PhysicsConfig.WORLD_H - PhysicsConfig.world.groundHeight;
-    const bottomStart = this.gapCenterY + this.gapHeight / 2;
-    return { x: this.x, y: bottomStart, w: this.width, h: groundY - bottomStart };
+  function setEnabled(v) {
+    enabled = v;
   }
 
-  update(dt, speed) {
-    this.x -= speed * dt;
-    if (this.x + this.width < -20) this.markedForRemoval = true;
+  function now() {
+    return ctx ? ctx.currentTime : 0;
   }
 
-  draw(ctx, theme) {
-    const top = this.topRect;
-    const bottom = this.bottomRect;
+  // a soft "flap" — short filtered noise burst + low sine thump
+  function flap() {
+    if (!enabled) return;
+    const c = ensureContext();
+    if (!c) return;
+    const t = now();
 
-    for (const rect of [top, bottom]) {
-      if (rect.h <= 0) continue;
-      this._drawBar(ctx, rect, theme);
-    }
+    // thump
+    const osc = c.createOscillator();
+    const g = c.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(180, t);
+    osc.frequency.exponentialRampToValueAtTime(70, t + 0.12);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.35, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.15);
+    osc.connect(g).connect(masterGain);
+    osc.start(t);
+    osc.stop(t + 0.16);
 
-    if (this.spark && !this.spark.collected) {
-      this._drawSpark(ctx);
-    }
+    // air whoosh (filtered noise)
+    const bufferSize = c.sampleRate * 0.15;
+    const buffer = c.createBuffer(1, bufferSize, c.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / bufferSize);
+    const noise = c.createBufferSource();
+    noise.buffer = buffer;
+    const filt = c.createBiquadFilter();
+    filt.type = 'bandpass';
+    filt.frequency.value = 900;
+    filt.Q.value = 0.6;
+    const ng = c.createGain();
+    ng.gain.value = 0.18;
+    noise.connect(filt).connect(ng).connect(masterGain);
+    noise.start(t);
   }
 
-  _drawBar(ctx, rect, theme) {
-    const grad = ctx.createLinearGradient(rect.x, 0, rect.x + rect.w, 0);
-    grad.addColorStop(0, theme.barShadow);
-    grad.addColorStop(0.5, theme.barMid);
-    grad.addColorStop(1, theme.barShadow);
-    ctx.fillStyle = grad;
-    ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
-
-    ctx.fillStyle = this.isSurgeGate ? theme.rimSurge : theme.rim;
-    const edgeThickness = 2.5;
-    const isTop = rect.y === 0;
-    if (isTop) {
-      ctx.fillRect(rect.x, rect.y + rect.h - edgeThickness, rect.w, edgeThickness);
-    } else {
-      ctx.fillRect(rect.x, rect.y, rect.w, edgeThickness);
-    }
-
-    ctx.strokeStyle = theme.barOutline;
-    ctx.lineWidth = 1;
-    ctx.strokeRect(rect.x + 0.5, rect.y + 0.5, rect.w - 1, Math.max(rect.h - 1, 0));
+  // score tick — small bright blip
+  function score() {
+    if (!enabled) return;
+    const c = ensureContext();
+    if (!c) return;
+    const t = now();
+    const osc = c.createOscillator();
+    const g = c.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(520, t);
+    osc.frequency.exponentialRampToValueAtTime(740, t + 0.08);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.25, t + 0.015);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+    osc.connect(g).connect(masterGain);
+    osc.start(t);
+    osc.stop(t + 0.2);
   }
 
-  _drawSpark(ctx) {
-    const s = this.spark;
-    const x = this.x + this.width / 2;
-    ctx.save();
-    ctx.globalAlpha = 0.95;
-    const grad = ctx.createRadialGradient(x, s.y, 0, x, s.y, s.r * 2.4);
-    grad.addColorStop(0, 'rgba(255,217,154,0.9)');
-    grad.addColorStop(1, 'rgba(255,217,154,0)');
-    ctx.fillStyle = grad;
-    ctx.beginPath();
-    ctx.arc(x, s.y, s.r * 2.4, 0, Math.PI * 2);
-    ctx.fill();
+  // collision/death — low thud + noise crash
+  function impact() {
+    if (!enabled) return;
+    const c = ensureContext();
+    if (!c) return;
+    const t = now();
 
-    ctx.fillStyle = '#ffe3b0';
-    ctx.beginPath();
-    ctx.arc(x, s.y, s.r, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
+    const osc = c.createOscillator();
+    const g = c.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(140, t);
+    osc.frequency.exponentialRampToValueAtTime(30, t + 0.4);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.4, t + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
+    osc.connect(g).connect(masterGain);
+    osc.start(t);
+    osc.stop(t + 0.55);
+
+    const bufferSize = c.sampleRate * 0.3;
+    const buffer = c.createBuffer(1, bufferSize, c.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / bufferSize);
+    const noise = c.createBufferSource();
+    noise.buffer = buffer;
+    const filt = c.createBiquadFilter();
+    filt.type = 'lowpass';
+    filt.frequency.value = 600;
+    const ng = c.createGain();
+    ng.gain.value = 0.3;
+    noise.connect(filt).connect(ng).connect(masterGain);
+    noise.start(t);
   }
 
-  getSparkTarget() {
-    if (!this.spark || this.spark.collected) return null;
-    return { cx: this.x + this.width / 2, cy: this.spark.y, r: this.spark.r };
-  }
-}
-
-
-class ObstacleField {
-  constructor(mode) {
-    this.mode = mode; // 'classic' | 'ember'
-    this.pairs = [];
-    this.distanceSinceSpawn = 0;
-    this.passCount = 0;
-    this.rng = Math.random;
-  }
-
-  reset() {
-    this.pairs.length = 0;
-    this.distanceSinceSpawn = 0;
-    this.passCount = 0;
+  // soft UI tap
+  function ui() {
+    if (!enabled) return;
+    const c = ensureContext();
+    if (!c) return;
+    const t = now();
+    const osc = c.createOscillator();
+    const g = c.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(420, t);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.12, t + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.09);
+    osc.connect(g).connect(masterGain);
+    osc.start(t);
+    osc.stop(t + 0.1);
   }
 
-  currentSpeed() {
-    const cfg = PhysicsConfig.obstacles;
-    const base = this.mode === 'ember' ? cfg.speedEmber : cfg.speed;
-    const ramps = Math.floor(this.passCount / cfg.rampEveryNPasses);
-    return Math.min(base + ramps * cfg.rampSpeedStep, cfg.rampSpeedCap);
+  // gate / surge pickup (ember mode)
+  function pickup() {
+    if (!enabled) return;
+    const c = ensureContext();
+    if (!c) return;
+    const t = now();
+    [0, 0.06].forEach((delay, i) => {
+      const osc = c.createOscillator();
+      const g = c.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(620 + i * 180, t + delay);
+      g.gain.setValueAtTime(0.0001, t + delay);
+      g.gain.exponentialRampToValueAtTime(0.22, t + delay + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + delay + 0.16);
+      osc.connect(g).connect(masterGain);
+      osc.start(t + delay);
+      osc.stop(t + delay + 0.18);
+    });
   }
 
-  currentGap() {
-    const cfg = PhysicsConfig.obstacles;
-    const base = this.mode === 'ember' ? cfg.gapHeightEmber : cfg.gapHeight;
-    const ramps = Math.floor(this.passCount / cfg.rampEveryNPasses);
-    return Math.max(base + ramps * cfg.rampGapStep, cfg.rampGapCap);
-  }
-
-  spawnPair() {
-    const cfg = PhysicsConfig.obstacles;
-    const gap = this.currentGap();
-    const margin = cfg.minGapCenterMargin;
-    const groundY = PhysicsConfig.WORLD_H - PhysicsConfig.world.groundHeight;
-    const minCenter = margin + gap / 2;
-    const maxCenter = groundY - margin - gap / 2;
-    const center = Util.randRange(minCenter, maxCenter);
-
-    const pair = new ObstaclePair(PhysicsConfig.WORLD_W + cfg.width, center, gap, cfg.width);
-
-    if (this.mode === 'ember') {
-      const r = Util.randRange(0, 1);
-      if (r < PhysicsConfig.ember.surgeChance) {
-        pair.isSurgeGate = true;
-      } else if (r < PhysicsConfig.ember.surgeChance + PhysicsConfig.ember.sparkChance) {
-        pair.spark = { y: center, collected: false, r: 7 };
-      }
-    }
-
-    this.pairs.push(pair);
-  }
-
-  update(dt) {
-    const cfg = PhysicsConfig.obstacles;
-    const speed = this.currentSpeed();
-
-    this.distanceSinceSpawn += speed * dt;
-    if (this.distanceSinceSpawn >= cfg.spawnIntervalPx) {
-      this.distanceSinceSpawn = 0;
-      this.spawnPair();
-    }
-
-    for (const pair of this.pairs) {
-      pair.update(dt, speed);
-    }
-
-    this.pairs = this.pairs.filter(p => !p.markedForRemoval);
-  }
-
-  draw(ctx, theme) {
-    for (const pair of this.pairs) pair.draw(ctx, theme);
-  }
-}
+  return { unlock, setEnabled, flap, score, impact, ui, pickup };
+})();

@@ -1,29 +1,35 @@
-@keyframes pulse-glow {
-  0%, 100% { transform: scale(1); box-shadow: 0 0 50px 10px var(--ember-glow); }
-  50% { transform: scale(1.08); box-shadow: 0 0 64px 16px var(--ember-glow); }
+.hud {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
 }
 
-@keyframes ready-pulse {
-  0% { transform: scale(0.85); opacity: 0.4; }
-  50% { transform: scale(1.15); opacity: 1; }
-  100% { transform: scale(0.85); opacity: 0.4; }
+.hud-score {
+  position: absolute;
+  top: calc(env(safe-area-inset-top, 0) + 36px);
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 52px;
+  font-weight: 800;
+  color: var(--text-parchment);
+  text-shadow: 0 2px 14px rgba(0,0,0,0.6);
+  font-variant-numeric: tabular-nums;
 }
 
-@keyframes fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-.screen:not(.hidden) {
-  animation: fade-in 0.18s ease;
-}
-
-@keyframes shake-flash {
-  0% { background: rgba(196, 80, 42, 0.0); }
-  15% { background: rgba(196, 80, 42, 0.25); }
-  100% { background: rgba(196, 80, 42, 0.0); }
+.hud-best {
+  position: absolute;
+  top: calc(env(safe-area-inset-top, 0) + 16px);
+  left: 18px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--text-faint);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .boot-mark, .ready-tap-icon { animation: none !important; }
-  .screen:not(.hidden) { animation: none !important; }
+.hud-pause {
+  position: absolute;
+  top: calc(env(safe-area-inset-top, 0) + 12px);
+  right: 14px;
+  pointer-events: auto;
 }

@@ -1,327 +1,171 @@
 /* ===================================================================
-   game.js — the core engine. Owns the canvas, the fixed-timestep
-   update loop, collision resolution, scoring, and the game's state
-   machine (boot -> menu -> ready -> running -> paused -> over).
-
-   Rendering uses a virtual coordinate space (PhysicsConfig.WORLD_W /
-   WORLD_H) that's scaled to the actual canvas size every frame, so
-   physics tuning is completely independent of device resolution.
+   obstacles.js — the scrolling bar obstacles (this game's equivalent
+   of pipes), plus Ember-mode collectibles (sparks + surge gates).
+   Kept deliberately simple geometry per the brief: clean rectangular
+   bars with a warm rim-light edge, no decoration.
 =================================================================== */
 
-const Game = (() => {
-  const STATE = {
-    BOOT: 'boot',
-    MENU: 'menu',
-    READY: 'ready',
-    RUNNING: 'running',
-    PAUSED: 'paused',
-    OVER: 'over'
-  };
+class ObstaclePair {
+  constructor(x, gapCenterY, gapHeight, width) {
+    this.x = x;
+    this.width = width;
+    this.gapCenterY = gapCenterY;
+    this.gapHeight = gapHeight;
+    this.passed = false;
+    this.markedForRemoval = false;
 
-  let canvas, ctx;
-  let dpr = 1;
-  let scale = 1;
-  let offsetX = 0, offsetY = 0;
-
-  let state = STATE.BOOT;
-  let mode = 'classic';
-
-  let player, background, obstacles, particles;
-  let score = 0;
-  let runStartTime = 0;
-  let elapsedMs = 0;
-
-  let lastFrameTime = 0;
-  let rafId = null;
-  let timeS = 0;
-
-  let shakeT = 0;
-  let surgeSlowT = 0;
-
-  const THEME = {
-    skyTop: '#0a0807',
-    skyMid: '#120d0a',
-    skyHorizon: '#1c130c',
-    silhouetteFar: '#1a140f',
-    silhouetteNear: '#100b08',
-    ground: '#150f0a',
-    groundRim: '#3a2e23',
-    groundLine: '#0a0705',
-    emberDust: '#e8943a',
-    barShadow: '#0d0a08',
-    barMid: '#2a2018',
-    barOutline: 'rgba(232,148,58,0.18)',
-    rim: '#e8943a',
-    rimSurge: '#ffd99a'
-  };
-
-  const listenersExternal = {
-    onScoreChange: null,
-    onStateChange: null,
-    onGameOver: null
-  };
-
-  function init(canvasEl) {
-    canvas = canvasEl;
-    ctx = canvas.getContext('2d');
-    resize();
-    window.addEventListener('resize', resize);
-    window.addEventListener('orientationchange', resize);
-
-    background = new Background();
-    particles = new ParticleSystem();
-    player = new Player(Skins.getDefault());
-    obstacles = new ObstacleField(mode);
-
-    Input.onFlap(handleFlapInput);
-
-    setState(STATE.BOOT);
+    this.spark = null;
+    this.isSurgeGate = false;
   }
 
-  function resize() {
-    dpr = Math.min(window.devicePixelRatio || 1, 2.5);
-    const rectW = canvas.parentElement ? canvas.parentElement.clientWidth : window.innerWidth;
-    const rectH = canvas.parentElement ? canvas.parentElement.clientHeight : window.innerHeight;
-
-    canvas.width = Math.floor(rectW * dpr);
-    canvas.height = Math.floor(rectH * dpr);
-    canvas.style.width = rectW + 'px';
-    canvas.style.height = rectH + 'px';
-
-    const scaleX = rectW / PhysicsConfig.WORLD_W;
-    const scaleY = rectH / PhysicsConfig.WORLD_H;
-    scale = Math.max(scaleX, scaleY);
-
-    offsetX = (rectW - PhysicsConfig.WORLD_W * scale) / 2;
-    offsetY = (rectH - PhysicsConfig.WORLD_H * scale) / 2;
+  get topRect() {
+    return { x: this.x, y: 0, w: this.width, h: this.gapCenterY - this.gapHeight / 2 };
   }
 
-  function setState(next) {
-    state = next;
-    if (listenersExternal.onStateChange) listenersExternal.onStateChange(next);
-  }
-
-  function getState() { return state; }
-
-  function setMode(m) {
-    mode = m;
-    obstacles = new ObstacleField(mode);
-  }
-
-  function setSkin(skin) {
-    player.skin = skin;
-  }
-
-  function startRun() {
-    score = 0;
-    elapsedMs = 0;
-    runStartTime = performance.now();
-    player.reset();
-    player.skin = Skins.getDefault();
-    obstacles.reset();
-    particles.clear();
-    shakeT = 0;
-    surgeSlowT = 0;
-    setState(STATE.READY);
-  }
-
-  function beginFlight(nowMs) {
-    if (state !== STATE.READY) return;
-    setState(STATE.RUNNING);
-    player.flap(nowMs);
-    Audio_.flap();
-    Util.vibrate(8);
-  }
-
-  function handleFlapInput() {
-    Audio_.unlock();
-    const nowMs = performance.now();
-
-    if (state === STATE.READY) {
-      beginFlight(nowMs);
-      return;
-    }
-    if (state === STATE.RUNNING) {
-      const did = player.flap(nowMs);
-      if (did) {
-        Audio_.flap();
-        Util.vibrate(6);
-      }
-      return;
-    }
-  }
-
-  function pause() {
-    if (state !== STATE.RUNNING) return;
-    setState(STATE.PAUSED);
-  }
-
-  function resume() {
-    if (state !== STATE.PAUSED) return;
-    lastFrameTime = performance.now();
-    setState(STATE.RUNNING);
-  }
-
-  function endRun() {
-    setState(STATE.OVER);
-    Audio_.impact();
-    Util.vibrate([0, 30, 40, 30]);
-    if (Storage.getSetting('shake')) shakeT = PhysicsConfig.shake.durationMs;
-    particles.burst(player.x, player.y, {
-      count: 26, speed: 260, color: '#e8943a', life: 0.7
-    });
-
-    const survivalMs = performance.now() - runStartTime;
-    const isBest = Storage.recordRun(mode, score, survivalMs);
-    const newSkins = Skins.checkUnlocks();
-
-    if (listenersExternal.onGameOver) {
-      listenersExternal.onGameOver({ score, isBest, survivalMs, newSkins });
-    }
-  }
-
-  function addScore(n) {
-    score += n;
-    if (listenersExternal.onScoreChange) listenersExternal.onScoreChange(score);
-  }
-
-  function checkCollisions() {
-    const bounds = player.getBounds();
-
+  get bottomRect() {
     const groundY = PhysicsConfig.WORLD_H - PhysicsConfig.world.groundHeight;
-    if (bounds.cy + bounds.r >= groundY) {
-      player.y = groundY - bounds.r;
-      player.alive = false;
-      endRun();
-      return;
+    const bottomStart = this.gapCenterY + this.gapHeight / 2;
+    return { x: this.x, y: bottomStart, w: this.width, h: groundY - bottomStart };
+  }
+
+  update(dt, speed) {
+    this.x -= speed * dt;
+    if (this.x + this.width < -20) this.markedForRemoval = true;
+  }
+
+  draw(ctx, theme) {
+    const top = this.topRect;
+    const bottom = this.bottomRect;
+
+    for (const rect of [top, bottom]) {
+      if (rect.h <= 0) continue;
+      this._drawBar(ctx, rect, theme);
     }
-    if (bounds.cy - bounds.r <= 0) {
-      player.y = bounds.r;
-      player.vy = 0;
-    }
 
-    for (const pair of obstacles.pairs) {
-      if (pair.x > player.x + 40 || pair.x + pair.width < player.x - 40) continue;
-
-      const hitTop = pair.topRect.h > 0 && Util.circleRectOverlap(bounds.cx, bounds.cy, bounds.r, pair.topRect);
-      const hitBottom = pair.bottomRect.h > 0 && Util.circleRectOverlap(bounds.cx, bounds.cy, bounds.r, pair.bottomRect);
-
-      if (hitTop || hitBottom) {
-        player.alive = false;
-        endRun();
-        return;
-      }
-
-      if (!pair.passed && pair.x + pair.width < player.x) {
-        pair.passed = true;
-        obstacles.passCount += 1;
-        if (pair.isSurgeGate) {
-          addScore(PhysicsConfig.ember.surgeBonusScore);
-          Audio_.pickup();
-          surgeSlowT = PhysicsConfig.ember.surgeSlowDurationMs;
-          particles.burst(player.x, player.y, { count: 22, speed: 200, color: '#ffd99a', life: 0.5 });
-        } else {
-          addScore(1);
-          Audio_.score();
-        }
-      }
-
-      const sparkTarget = pair.getSparkTarget();
-      if (sparkTarget && Util.circleRectOverlap(bounds.cx, bounds.cy, bounds.r + sparkTarget.r,
-            { x: sparkTarget.cx - sparkTarget.r, y: sparkTarget.cy - sparkTarget.r, w: sparkTarget.r * 2, h: sparkTarget.r * 2 })) {
-        pair.spark.collected = true;
-        addScore(PhysicsConfig.ember.sparkScoreValue);
-        Audio_.pickup();
-        particles.burst(sparkTarget.cx, sparkTarget.cy, { count: 10, speed: 140, color: '#ffe3b0', life: 0.4 });
-      }
+    if (this.spark && !this.spark.collected) {
+      this._drawSpark(ctx);
     }
   }
 
-  function frame(now) {
-    rafId = requestAnimationFrame(frame);
+  _drawBar(ctx, rect, theme) {
+    const grad = ctx.createLinearGradient(rect.x, 0, rect.x + rect.w, 0);
+    grad.addColorStop(0, theme.barShadow);
+    grad.addColorStop(0.5, theme.barMid);
+    grad.addColorStop(1, theme.barShadow);
+    ctx.fillStyle = grad;
+    ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
 
-    if (!lastFrameTime) lastFrameTime = now;
-    let dt = (now - lastFrameTime) / 1000;
-    lastFrameTime = now;
-    dt = Math.min(dt, 1 / 30);
-
-    timeS += dt;
-
-    let simDt = dt;
-    if (surgeSlowT > 0) {
-      surgeSlowT -= dt * 1000;
-      simDt = dt * PhysicsConfig.ember.surgeSlowFactor;
+    ctx.fillStyle = this.isSurgeGate ? theme.rimSurge : theme.rim;
+    const edgeThickness = 2.5;
+    const isTop = rect.y === 0;
+    if (isTop) {
+      ctx.fillRect(rect.x, rect.y + rect.h - edgeThickness, rect.w, edgeThickness);
+    } else {
+      ctx.fillRect(rect.x, rect.y, rect.w, edgeThickness);
     }
 
-    update(simDt, dt, now);
-    render();
+    ctx.strokeStyle = theme.barOutline;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(rect.x + 0.5, rect.y + 0.5, rect.w - 1, Math.max(rect.h - 1, 0));
   }
 
-  function update(simDt, realDt, nowMs) {
-    background.update(simDt, timeS);
-
-    if (state === STATE.READY) {
-      player.idleBob(timeS);
-    } else if (state === STATE.RUNNING) {
-      player.update(simDt, nowMs);
-      obstacles.update(simDt);
-      checkCollisions();
-      elapsedMs += simDt * 1000;
-    } else if (state === STATE.OVER) {
-      player.update(simDt, nowMs);
-    }
-
-    particles.update(realDt);
-
-    if (shakeT > 0) shakeT -= realDt * 1000;
-  }
-
-  function render() {
+  _drawSpark(ctx) {
+    const s = this.spark;
+    const x = this.x + this.width / 2;
     ctx.save();
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, canvas.width / dpr, canvas.height / dpr);
-
-    let shakeX = 0, shakeY = 0;
-    if (shakeT > 0) {
-      const t = shakeT / PhysicsConfig.shake.durationMs;
-      const mag = PhysicsConfig.shake.magnitude * t;
-      shakeX = Util.randRange(-mag, mag);
-      shakeY = Util.randRange(-mag, mag);
-    }
-
-    ctx.translate(offsetX + shakeX, offsetY + shakeY);
-    ctx.scale(scale, scale);
-
+    ctx.globalAlpha = 0.95;
+    const grad = ctx.createRadialGradient(x, s.y, 0, x, s.y, s.r * 2.4);
+    grad.addColorStop(0, 'rgba(255,217,154,0.9)');
+    grad.addColorStop(1, 'rgba(255,217,154,0)');
+    ctx.fillStyle = grad;
     ctx.beginPath();
-    ctx.rect(0, 0, PhysicsConfig.WORLD_W, PhysicsConfig.WORLD_H);
-    ctx.clip();
+    ctx.arc(x, s.y, s.r * 2.4, 0, Math.PI * 2);
+    ctx.fill();
 
-    background.draw(ctx, THEME);
-    obstacles.draw(ctx, THEME);
-    particles.draw(ctx);
-    if (state !== STATE.BOOT && state !== STATE.MENU) {
-      player.draw(ctx);
-    }
-
+    ctx.fillStyle = '#ffe3b0';
+    ctx.beginPath();
+    ctx.arc(x, s.y, s.r, 0, Math.PI * 2);
+    ctx.fill();
     ctx.restore();
   }
 
-  function start() {
-    if (rafId) return;
-    lastFrameTime = 0;
-    rafId = requestAnimationFrame(frame);
+  getSparkTarget() {
+    if (!this.spark || this.spark.collected) return null;
+    return { cx: this.x + this.width / 2, cy: this.spark.y, r: this.spark.r };
+  }
+}
+
+
+class ObstacleField {
+  constructor(mode) {
+    this.mode = mode; // 'classic' | 'ember'
+    this.pairs = [];
+    this.distanceSinceSpawn = 0;
+    this.passCount = 0;
+    this.rng = Math.random;
   }
 
-  function getScore() { return score; }
-  function getMode() { return mode; }
-  function getPlayer() { return player; }
-  function getObstacles() { return obstacles; }
+  reset() {
+    this.pairs.length = 0;
+    this.distanceSinceSpawn = 0;
+    this.passCount = 0;
+  }
 
-  return {
-    STATE, init, start, resize,
-    setState, getState, setMode, getMode, setSkin,
-    startRun, beginFlight, pause, resume,
-    getScore, getPlayer, getObstacles,
-    listeners: listenersExternal
-  };
-})();
+  currentSpeed() {
+    const cfg = PhysicsConfig.obstacles;
+    const base = this.mode === 'ember' ? cfg.speedEmber : cfg.speed;
+    const ramps = Math.floor(this.passCount / cfg.rampEveryNPasses);
+    return Math.min(base + ramps * cfg.rampSpeedStep, cfg.rampSpeedCap);
+  }
+
+  currentGap() {
+    const cfg = PhysicsConfig.obstacles;
+    const base = this.mode === 'ember' ? cfg.gapHeightEmber : cfg.gapHeight;
+    const ramps = Math.floor(this.passCount / cfg.rampEveryNPasses);
+    return Math.max(base + ramps * cfg.rampGapStep, cfg.rampGapCap);
+  }
+
+  spawnPair() {
+    const cfg = PhysicsConfig.obstacles;
+    const gap = this.currentGap();
+    const margin = cfg.minGapCenterMargin;
+    const groundY = PhysicsConfig.WORLD_H - PhysicsConfig.world.groundHeight;
+    const minCenter = margin + gap / 2;
+    const maxCenter = groundY - margin - gap / 2;
+    const center = Util.randRange(minCenter, maxCenter);
+
+    const pair = new ObstaclePair(PhysicsConfig.WORLD_W + cfg.width, center, gap, cfg.width);
+
+    if (this.mode === 'ember') {
+      const r = Util.randRange(0, 1);
+      if (r < PhysicsConfig.ember.surgeChance) {
+        pair.isSurgeGate = true;
+      } else if (r < PhysicsConfig.ember.surgeChance + PhysicsConfig.ember.sparkChance) {
+        pair.spark = { y: center, collected: false, r: 7 };
+      }
+    }
+
+    this.pairs.push(pair);
+  }
+
+  update(dt) {
+    const cfg = PhysicsConfig.obstacles;
+    const speed = this.currentSpeed();
+
+    this.distanceSinceSpawn += speed * dt;
+    if (this.distanceSinceSpawn >= cfg.spawnIntervalPx) {
+      this.distanceSinceSpawn = 0;
+      this.spawnPair();
+    }
+
+    for (const pair of this.pairs) {
+      pair.update(dt, speed);
+    }
+
+    this.pairs = this.pairs.filter(p => !p.markedForRemoval);
+  }
+
+  draw(ctx, theme) {
+    for (const pair of this.pairs) pair.draw(ctx, theme);
+  }
+}

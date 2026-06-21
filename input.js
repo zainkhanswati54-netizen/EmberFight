@@ -1,80 +1,96 @@
 /* ===================================================================
-   utils.js — small shared helpers used across the game modules.
-   No dependencies. Attaches everything to a single global `Util`
-   namespace so we don't pollute window with dozens of names.
+   physics-config.js — every tunable physics constant lives here so
+   the feel of the game can be tuned in one place without hunting
+   through game logic.
+
+   Units: pixels are in a fixed virtual coordinate space (see Game),
+   velocities are px/second, accelerations are px/second^2. We run
+   real delta-time integration (not fixed per-frame increments) so
+   the game feels identical at 30fps, 60fps, 90fps and 120fps.
 =================================================================== */
 
-const Util = (() => {
+const PhysicsConfig = {
+  // virtual world size — the canvas is scaled to fit this regardless
+  // of actual device resolution, so physics tuning never depends on
+  // screen size.
+  WORLD_W: 400,
+  WORLD_H: 711, // ~9:16
 
-  function clamp(v, min, max) {
-    return v < min ? min : (v > max ? max : v);
+  player: {
+    radius: 13,
+    startX: 120,
+
+    // gravity is applied continuously; this is acceleration, not a
+    // per-frame velocity add, so timing is frame-rate independent
+    gravity: 1500,           // px/s^2
+
+    // terminal velocity — caps fall speed so it never feels
+    // "uncontrollable", classic-arcade-flappy style but smoother
+    maxFallSpeed: 620,        // px/s
+    maxRiseSpeed: -560,       // px/s (negative = up)
+
+    // flap is an instantaneous velocity SET (not additive), which
+    // is what makes Flappy-style controls feel crisp instead of
+    // mushy — every tap gives a consistent, predictable pop
+    flapVelocity: -420,       // px/s
+
+    // a tiny grace window after a flap during which a second tap
+    // is ignored — prevents accidental double-taps from feeling
+    // broken, without adding any input lag you can perceive
+    flapDebounceMs: 60,
+
+    // rotation: visual tilt is derived from vertical velocity, not
+    // an independent simulation, so it can never desync from motion
+    rotationMaxUp: -28,       // degrees, nose-up when rising
+    rotationMaxDown: 78,      // degrees, nose-down when diving
+    rotationSmoothing: 14,    // higher = snappier tilt response
+
+    // squash/stretch tied to velocity magnitude for extra juice
+    squashAmount: 0.16,
+
+    // how far from world edges the orb can legally sit before it
+    // counts as out-of-bounds (ceiling bonk / floor death)
+    ceilingY: 0,
+    floorMargin: 90 // matches ground height in background.js
+  },
+
+  obstacles: {
+    width: 56,
+    gapHeight: 168,            // classic mode base gap
+    gapHeightEmber: 178,       // ember mode slightly more forgiving (more hazards)
+    minGapCenterMargin: 90,    // keep gap center away from extreme top/bottom
+    speed: 165,                // px/s leftward scroll, classic
+    speedEmber: 158,
+    spawnIntervalPx: 230,      // horizontal distance between obstacle pairs
+
+    // difficulty ramp: every N obstacles passed, speed and gap
+    // tighten slightly, capped so it never becomes unfair
+    rampEveryNPasses: 5,
+    rampSpeedStep: 6,
+    rampSpeedCap: 320,
+    rampGapStep: -4,
+    rampGapCap: 122
+  },
+
+  ember: {
+    sparkChance: 0.6,         // chance an obstacle gap also spawns a collectible spark
+    sparkScoreValue: 1,
+    surgeChance: 0.12,        // chance an obstacle pair is replaced by a "surge gate" bonus
+    surgeBonusScore: 5,
+    surgeSlowFactor: 0.55,    // brief time-dilation feel when passing a surge gate
+    surgeSlowDurationMs: 420
+  },
+
+  world: {
+    parallaxFarSpeed: 18,
+    parallaxNearSpeed: 46,
+    groundHeight: 90,
+    groundScrollSpeed: 165
+  },
+
+  // screen shake on death
+  shake: {
+    durationMs: 280,
+    magnitude: 9
   }
-
-  function lerp(a, b, t) {
-    return a + (b - a) * t;
-  }
-
-  // exponential smoothing toward target, framerate independent
-  function damp(current, target, lambda, dt) {
-    return lerp(current, target, 1 - Math.exp(-lambda * dt));
-  }
-
-  function randRange(min, max) {
-    return min + Math.random() * (max - min);
-  }
-
-  function randInt(min, max) {
-    return Math.floor(randRange(min, max + 1));
-  }
-
-  function rectsOverlap(a, b) {
-    return a.x < b.x + b.w &&
-           a.x + a.w > b.x &&
-           a.y < b.y + b.h &&
-           a.y + a.h > b.y;
-  }
-
-  // circle vs axis-aligned rect collision (used for the orb vs bar obstacles)
-  function circleRectOverlap(cx, cy, radius, rect) {
-    const nearestX = clamp(cx, rect.x, rect.x + rect.w);
-    const nearestY = clamp(cy, rect.y, rect.y + rect.h);
-    const dx = cx - nearestX;
-    const dy = cy - nearestY;
-    return (dx * dx + dy * dy) < (radius * radius);
-  }
-
-  function formatNumber(n) {
-    return n.toString();
-  }
-
-  // simple seeded PRNG (mulberry32) — used so daily/seeded runs are reproducible
-  function mulberry32(seed) {
-    let a = seed;
-    return function () {
-      a |= 0; a = (a + 0x6D2B79F5) | 0;
-      let t = Math.imul(a ^ (a >>> 15), 1 | a);
-      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
-  }
-
-  function once(fn) {
-    let called = false, result;
-    return (...args) => {
-      if (!called) { called = true; result = fn(...args); }
-      return result;
-    };
-  }
-
-  function vibrate(pattern) {
-    if (navigator.vibrate) {
-      try { navigator.vibrate(pattern); } catch (e) { /* ignore */ }
-    }
-  }
-
-  return {
-    clamp, lerp, damp, randRange, randInt,
-    rectsOverlap, circleRectOverlap, formatNumber,
-    mulberry32, once, vibrate
-  };
-})();
+};
