@@ -1,0 +1,121 @@
+/* ===================================================================
+   skins.js — defines the selectable player "marks". Kept data-driven
+   so adding a new skin is just adding an entry to this array.
+=================================================================== */
+
+const Skins = (() => {
+  const LIST = [
+    {
+      id: 'ember',
+      name: 'EMBER',
+      unlockHint: '',
+      requirement: null,
+      colors: {
+        highlight: '#ffe3b0',
+        mid: '#e8943a',
+        shadow: '#8a3d1c',
+        rim: '#ffd99a',
+        glow: 'rgba(232,148,58,0.55)'
+      }
+    },
+    {
+      id: 'cinder',
+      name: 'CINDER',
+      unlockHint: 'reach a score of 10',
+      requirement: { type: 'score', value: 10 },
+      colors: {
+        highlight: '#ffb199',
+        mid: '#c4502a',
+        shadow: '#5c1f0e',
+        rim: '#ff8f6b',
+        glow: 'rgba(196,80,42,0.55)'
+      }
+    },
+    {
+      id: 'ash',
+      name: 'ASH',
+      unlockHint: 'reach a score of 25',
+      requirement: { type: 'score', value: 25 },
+      colors: {
+        highlight: '#e7ded0',
+        mid: '#9c8a73',
+        shadow: '#3a322a',
+        rim: '#cfc3ab',
+        glow: 'rgba(156,138,115,0.45)'
+      }
+    },
+    {
+      id: 'pale-flame',
+      name: 'PALE FLAME',
+      unlockHint: '50 total runs',
+      requirement: { type: 'runs', value: 50 },
+      colors: {
+        highlight: '#fff6e0',
+        mid: '#f4b860',
+        shadow: '#8a3d1c',
+        rim: '#fff0c8',
+        glow: 'rgba(244,184,96,0.6)'
+      }
+    },
+    {
+      id: 'deep-coal',
+      name: 'DEEP COAL',
+      unlockHint: 'survive 60s in one run',
+      requirement: { type: 'survival', value: 60000 },
+      colors: {
+        highlight: '#7a6a58',
+        mid: '#3a2e23',
+        shadow: '#16110d',
+        rim: '#e8943a',
+        glow: 'rgba(58,46,35,0.5)'
+      }
+    }
+  ];
+
+  function getAll() {
+    return LIST;
+  }
+
+  function getById(id) {
+    return LIST.find(s => s.id === id) || LIST[0];
+  }
+
+  function getDefault() {
+    const saved = Storage.get().selectedSkin;
+    return getById(saved);
+  }
+
+  function isUnlocked(id) {
+    return Storage.isSkinUnlocked(id);
+  }
+
+  // checks all skin requirements against current save data and
+  // unlocks any newly-earned ones; returns array of newly unlocked skins
+  function checkUnlocks() {
+    const data = Storage.get();
+    const newlyUnlocked = [];
+    for (const skin of LIST) {
+      if (!skin.requirement) continue;
+      if (Storage.isSkinUnlocked(skin.id)) continue;
+
+      const req = skin.requirement;
+      let met = false;
+      if (req.type === 'score') {
+        const best = Math.max(data.bestScore.classic || 0, data.bestScore.ember || 0);
+        met = best >= req.value;
+      } else if (req.type === 'runs') {
+        met = data.totalRuns >= req.value;
+      } else if (req.type === 'survival') {
+        met = data.longestSurvivalMs >= req.value;
+      }
+
+      if (met) {
+        Storage.unlockSkin(skin.id);
+        newlyUnlocked.push(skin);
+      }
+    }
+    return newlyUnlocked;
+  }
+
+  return { getAll, getById, getDefault, isUnlocked, checkUnlocks };
+})();
