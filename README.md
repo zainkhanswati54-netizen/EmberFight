@@ -1,148 +1,91 @@
-/* ===================================================================
-   player.js — the player-controlled orb. Pure physics + rendering,
-   no input handling or collision resolution here (that lives in
-   game.js so this file can be unit-reasoned-about in isolation).
-=================================================================== */
+# Ember Flight
 
-class Player {
-  constructor(skin) {
-    const cfg = PhysicsConfig.player;
-    this.cfg = cfg;
-    this.x = cfg.startX;
-    this.y = PhysicsConfig.WORLD_H / 2;
-    this.vy = 0;
-    this.radius = cfg.radius;
-    this.rotation = 0;         // degrees, smoothed
-    this.lastFlapAt = -Infinity;
-    this.alive = true;
-    this.skin = skin || Skins.getDefault();
-    this.flapFlashT = 0;       // brief visual pulse on flap, decays
-    this.trail = [];           // ember particle trail positions
-    this.trailTimer = 0;
-  }
+A dark, minimal gravity-flight game. Tap to rise, let go to fall.
 
-  reset() {
-    this.x = this.cfg.startX;
-    this.y = PhysicsConfig.WORLD_H / 2;
-    this.vy = 0;
-    this.rotation = 0;
-    this.lastFlapAt = -Infinity;
-    this.alive = true;
-    this.flapFlashT = 0;
-    this.trail.length = 0;
-  }
+Same core physics idea as classic tap-to-fly games — gravity, a flap impulse,
+gaps to thread — rebuilt with a moody, monochrome-warm visual identity
+(near-black backgrounds, ember/amber glow, silhouette skylines) instead of
+a bright cartoon look.
 
-  // idle bobbing motion used on the "ready" screen before the run starts
-  idleBob(t) {
-    this.y = PhysicsConfig.WORLD_H / 2 + Math.sin(t * 2.4) * 10;
-    this.rotation = Math.sin(t * 2.4) * 6;
-  }
+No build step. No frameworks. No dependencies. Pure HTML/CSS/JS, runs
+straight from static files.
 
-  flap(nowMs) {
-    if (!this.alive) return false;
-    if (nowMs - this.lastFlapAt < this.cfg.flapDebounceMs) return false;
-    this.lastFlapAt = nowMs;
-    this.vy = this.cfg.flapVelocity;
-    this.flapFlashT = 1;
-    return true;
-  }
+## Play it locally
 
-  // dt in seconds
-  update(dt, nowMs) {
-    if (!this.alive) {
-      // after death, keep falling under gravity for a satisfying drop
-      this.vy = Util.clamp(this.vy + this.cfg.gravity * dt, this.cfg.maxRiseSpeed, this.cfg.maxFallSpeed * 1.4);
-      this.y += this.vy * dt;
-      this.rotation = Util.damp(this.rotation, 90, 6, dt);
-      return;
-    }
+Just open `index.html` in a browser, or serve the folder so the manifest
+and relative paths resolve cleanly:
 
-    this.vy += this.cfg.gravity * dt;
-    this.vy = Util.clamp(this.vy, this.cfg.maxRiseSpeed, this.cfg.maxFallSpeed);
-    this.y += this.vy * dt;
+```bash
+python3 -m http.server 8080
+# then visit http://localhost:8080
+```
 
-    // rotation derived purely from velocity — see physics-config notes
-    const targetRot = this.vy < 0
-      ? Util.lerp(0, this.cfg.rotationMaxUp, Util.clamp(this.vy / this.cfg.maxRiseSpeed, 0, 1))
-      : Util.lerp(0, this.cfg.rotationMaxDown, Util.clamp(this.vy / this.cfg.maxFallSpeed, 0, 1));
-    this.rotation = Util.damp(this.rotation, targetRot, this.cfg.rotationSmoothing, dt);
+## Deploy to GitHub Pages (already wired up)
 
-    this.flapFlashT = Util.damp(this.flapFlashT, 0, 10, dt);
+This repo ships with a GitHub Actions workflow at
+`.github/workflows/deploy.yml` that publishes the site to GitHub Pages
+automatically on every push to `main`.
 
-    // ember trail particles while alive
-    this.trailTimer -= dt;
-    if (this.trailTimer <= 0) {
-      this.trail.push({ x: this.x, y: this.y, life: 1, r: this.radius * 0.5 });
-      this.trailTimer = 0.028;
-    }
-    for (let i = this.trail.length - 1; i >= 0; i--) {
-      const p = this.trail[i];
-      p.life -= dt * 2.6;
-      if (p.life <= 0) this.trail.splice(i, 1);
-    }
-  }
+To turn it on after pushing this repo to GitHub:
 
-  getBounds() {
-    // slightly smaller than visual radius for a forgiving hitbox —
-    // classic Flappy clones do this; it just feels fairer
-    return { cx: this.x, cy: this.y, r: this.radius * 0.82 };
-  }
+1. Go to **Settings → Pages**.
+2. Under **Build and deployment → Source**, choose **GitHub Actions**.
+3. Push to `main` (or run the workflow manually from the **Actions** tab).
+4. Your game will be live at `https://<your-username>.github.io/<repo-name>/`.
 
-  draw(ctx) {
-    // trail first (behind orb)
-    for (const p of this.trail) {
-      ctx.save();
-      ctx.globalAlpha = Util.clamp(p.life, 0, 1) * 0.5;
-      const grad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.r * (0.6 + p.life * 0.6));
-      grad.addColorStop(0, this.skin.colors.glow);
-      grad.addColorStop(1, 'rgba(0,0,0,0)');
-      ctx.fillStyle = grad;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.r * (0.6 + p.life * 0.6), 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-    }
+A second workflow, `.github/workflows/ci.yml`, syntax-checks every JS file
+on every push and pull request so a broken commit never silently reaches
+Pages.
 
-    ctx.save();
-    ctx.translate(this.x, this.y);
-    ctx.rotate(this.rotation * Math.PI / 180);
+## How it's organized
 
-    const stretch = 1 + Util.clamp(Math.abs(this.vy) / this.cfg.maxFallSpeed, 0, 1) * this.cfg.squashAmount;
-    const squash = 1 / stretch;
-    ctx.scale(squash, stretch);
+```
+index.html              All screens (boot, menu, skins, settings, stats,
+                         HUD, pause, game over) as plain DOM markup.
+css/
+  reset.css              Browser reset
+  theme.css               Color tokens — the whole palette lives here
+  layout.css               Shared structural/button styles
+  screens.css                Per-screen layout
+  hud.css                     In-run HUD
+  animations.css               Keyframes, reduced-motion handling
+js/
+  utils.js                Math/random/collision helpers
+  storage.js               Versioned localStorage save layer
+  audio.js                  Procedurally synthesized SFX (no audio files)
+  input.js                   Unified pointer/touch/keyboard -> "flap" events
+  skins.js                    Selectable player marks + unlock conditions
+  particles.js                  Burst particle system (death/pickup FX)
+  player.js                      The orb: physics + rendering
+  obstacles.js                    Bar obstacles + Ember-mode collectibles
+  background.js                    Parallax silhouette layers + ground
+  physics-config.js                 Every tunable physics constant
+  game.js                            Core loop, state machine, collisions
+  screens.js                          DOM screen wiring
+  main.js                              Boot sequence
+assets/icons/favicon.svg   App icon
+manifest.json              PWA manifest (installable, standalone)
+```
 
-    // outer glow
-    const glowR = this.radius * (1.8 + this.flapFlashT * 0.8);
-    const glow = ctx.createRadialGradient(0, 0, this.radius * 0.2, 0, 0, glowR);
-    glow.addColorStop(0, this.skin.colors.glow);
-    glow.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = glow;
-    ctx.beginPath();
-    ctx.arc(0, 0, glowR, 0, Math.PI * 2);
-    ctx.fill();
+## Physics notes
 
-    // body
-    const bodyGrad = ctx.createRadialGradient(
-      -this.radius * 0.3, -this.radius * 0.35, this.radius * 0.1,
-      0, 0, this.radius
-    );
-    bodyGrad.addColorStop(0, this.skin.colors.highlight);
-    bodyGrad.addColorStop(0.5, this.skin.colors.mid);
-    bodyGrad.addColorStop(1, this.skin.colors.shadow);
-    ctx.fillStyle = bodyGrad;
-    ctx.beginPath();
-    ctx.arc(0, 0, this.radius, 0, Math.PI * 2);
-    ctx.fill();
+- Gravity and velocity are integrated with **real delta-time**, not fixed
+  per-frame increments — the game feels identical at 30/60/90/120fps.
+- A flap **sets** vertical velocity to a fixed value rather than adding to
+  it, which is what gives tap controls a crisp, predictable pop instead of
+  feeling mushy or stackable.
+- Fall speed is capped at a tunable terminal velocity.
+- Visual rotation and squash/stretch are *derived* from velocity every
+  frame rather than separately animated, so they can never desync from
+  the actual motion.
+- All tuning constants live in one file: `js/physics-config.js`.
 
-    // rim light edge (matches the "lit from behind" reference look)
-    ctx.strokeStyle = this.skin.colors.rim;
-    ctx.lineWidth = 1.4;
-    ctx.globalAlpha = 0.8;
-    ctx.beginPath();
-    ctx.arc(0, 0, this.radius - 0.7, -2.4, 0.9);
-    ctx.stroke();
-    ctx.globalAlpha = 1;
+## Modes
 
-    ctx.restore();
-  }
-}
+- **Classic** — pure score run, closest to the original formula.
+- **Ember Run** — adds collectible sparks and rare "surge gates" that grant
+  bonus score and a brief time-dilation moment.
+
+## License
+
+MIT — see `LICENSE`.

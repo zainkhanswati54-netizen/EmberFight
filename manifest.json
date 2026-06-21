@@ -1,40 +1,19 @@
-/* ===================================================================
-   main.js — application entry point. Boots the game engine, the
-   screen UI, and global concerns like viewport-height fixing for
-   mobile browser chrome and the initial audio-enabled state.
-=================================================================== */
-
-(function () {
-  function fixViewportHeight() {
-    const vh = window.innerHeight * 0.01;
-    document.documentElement.style.setProperty('--vh', `${vh}px`);
-  }
-
-  function preventiOSBounce() {
-    document.addEventListener('touchmove', (e) => {
-      if (e.touches.length > 1) e.preventDefault();
-    }, { passive: false });
-  }
-
-  function boot() {
-    fixViewportHeight();
-    window.addEventListener('resize', fixViewportHeight);
-    window.addEventListener('orientationchange', () => setTimeout(fixViewportHeight, 200));
-    preventiOSBounce();
-
-    Audio_.setEnabled(Storage.getSetting('sound'));
-
-    const canvas = document.getElementById('game-canvas');
-    Game.init(canvas);
-    Input.attach(document.getElementById('app'));
-    Game.start();
-
-    Screens.init();
-  }
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', boot);
-  } else {
-    boot();
-  }
-})();
+{
+  "name": "Ember Flight",
+  "short_name": "EmberFlight",
+  "description": "A dark, minimal gravity-flight game. Tap to rise, let go to fall.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0d0a08",
+  "theme_color": "#0d0a08",
+  "icons": [
+    {
+      "src": "assets/icons/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

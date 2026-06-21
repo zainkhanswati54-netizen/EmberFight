@@ -1,121 +1,227 @@
-/* ===================================================================
-   skins.js — defines the selectable player "marks". Kept data-driven
-   so adding a new skin is just adding an entry to this array.
-=================================================================== */
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<meta name="theme-color" content="#0d0a08" />
+<title>EMBER FLIGHT</title>
+<meta name="description" content="A dark, minimal gravity-flight game. Tap to rise, let go to fall." />
 
-const Skins = (() => {
-  const LIST = [
-    {
-      id: 'ember',
-      name: 'EMBER',
-      unlockHint: '',
-      requirement: null,
-      colors: {
-        highlight: '#ffe3b0',
-        mid: '#e8943a',
-        shadow: '#8a3d1c',
-        rim: '#ffd99a',
-        glow: 'rgba(232,148,58,0.55)'
-      }
-    },
-    {
-      id: 'cinder',
-      name: 'CINDER',
-      unlockHint: 'reach a score of 10',
-      requirement: { type: 'score', value: 10 },
-      colors: {
-        highlight: '#ffb199',
-        mid: '#c4502a',
-        shadow: '#5c1f0e',
-        rim: '#ff8f6b',
-        glow: 'rgba(196,80,42,0.55)'
-      }
-    },
-    {
-      id: 'ash',
-      name: 'ASH',
-      unlockHint: 'reach a score of 25',
-      requirement: { type: 'score', value: 25 },
-      colors: {
-        highlight: '#e7ded0',
-        mid: '#9c8a73',
-        shadow: '#3a322a',
-        rim: '#cfc3ab',
-        glow: 'rgba(156,138,115,0.45)'
-      }
-    },
-    {
-      id: 'pale-flame',
-      name: 'PALE FLAME',
-      unlockHint: '50 total runs',
-      requirement: { type: 'runs', value: 50 },
-      colors: {
-        highlight: '#fff6e0',
-        mid: '#f4b860',
-        shadow: '#8a3d1c',
-        rim: '#fff0c8',
-        glow: 'rgba(244,184,96,0.6)'
-      }
-    },
-    {
-      id: 'deep-coal',
-      name: 'DEEP COAL',
-      unlockHint: 'survive 60s in one run',
-      requirement: { type: 'survival', value: 60000 },
-      colors: {
-        highlight: '#7a6a58',
-        mid: '#3a2e23',
-        shadow: '#16110d',
-        rim: '#e8943a',
-        glow: 'rgba(58,46,35,0.5)'
-      }
-    }
-  ];
+<link rel="icon" href="assets/icons/favicon.svg" type="image/svg+xml" />
+<link rel="manifest" href="manifest.json" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;800&display=swap">
 
-  function getAll() {
-    return LIST;
-  }
+<link rel="stylesheet" href="css/reset.css" />
+<link rel="stylesheet" href="css/theme.css" />
+<link rel="stylesheet" href="css/layout.css" />
+<link rel="stylesheet" href="css/screens.css" />
+<link rel="stylesheet" href="css/hud.css" />
+<link rel="stylesheet" href="css/animations.css" />
+</head>
+<body>
 
-  function getById(id) {
-    return LIST.find(s => s.id === id) || LIST[0];
-  }
+<div id="app" class="app">
 
-  function getDefault() {
-    const saved = Storage.get().selectedSkin;
-    return getById(saved);
-  }
+  <!-- Game canvas -->
+  <canvas id="game-canvas" class="game-canvas" aria-hidden="true"></canvas>
 
-  function isUnlocked(id) {
-    return Storage.isSkinUnlocked(id);
-  }
+  <!-- ============ HUD (in-run) ============ -->
+  <div id="hud" class="hud hidden">
+    <div class="hud-score" id="hud-score">0</div>
+    <div class="hud-best" id="hud-best">BEST 0</div>
+    <button id="hud-pause" class="icon-btn hud-pause" aria-label="Pause">
+      <svg viewBox="0 0 24 24" width="18" height="18"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
+    </button>
+  </div>
 
-  // checks all skin requirements against current save data and
-  // unlocks any newly-earned ones; returns array of newly unlocked skins
-  function checkUnlocks() {
-    const data = Storage.get();
-    const newlyUnlocked = [];
-    for (const skin of LIST) {
-      if (!skin.requirement) continue;
-      if (Storage.isSkinUnlocked(skin.id)) continue;
+  <!-- ============ BOOT / LOGO SCREEN ============ -->
+  <section id="screen-boot" class="screen screen-boot">
+    <div class="boot-wrap">
+      <div class="boot-mark" id="boot-mark"></div>
+      <h1 class="boot-title">EMBER<span>FLIGHT</span></h1>
+      <div class="boot-bar"><div class="boot-bar-fill" id="boot-bar-fill"></div></div>
+      <p class="boot-sub">loading the dark&hellip;</p>
+    </div>
+  </section>
 
-      const req = skin.requirement;
-      let met = false;
-      if (req.type === 'score') {
-        const best = Math.max(data.bestScore.classic || 0, data.bestScore.ember || 0);
-        met = best >= req.value;
-      } else if (req.type === 'runs') {
-        met = data.totalRuns >= req.value;
-      } else if (req.type === 'survival') {
-        met = data.longestSurvivalMs >= req.value;
-      }
+  <!-- ============ MAIN MENU ============ -->
+  <section id="screen-menu" class="screen screen-menu hidden">
+    <header class="menu-top">
+      <button id="btn-settings" class="icon-btn" aria-label="Settings">
+        <svg viewBox="0 0 24 24" width="20" height="20"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M19.4 13.5c.05-.49.08-.99.08-1.5s-.03-1.01-.08-1.5l2.04-1.58a.5.5 0 0 0 .12-.64l-1.93-3.32a.5.5 0 0 0-.6-.22l-2.4.96a7.5 7.5 0 0 0-1.3-.75l-.36-2.55a.5.5 0 0 0-.5-.43h-3.86a.5.5 0 0 0-.5.43l-.36 2.55c-.47.2-.9.45-1.3.75l-2.4-.96a.5.5 0 0 0-.6.22L3.62 8.28a.5.5 0 0 0 .12.64L5.78 10.5c-.05.49-.08.99-.08 1.5s.03 1.01.08 1.5l-2.04 1.58a.5.5 0 0 0-.12.64l1.93 3.32c.13.22.39.31.6.22l2.4-.96c.4.3.83.55 1.3.75l.36 2.55c.05.25.26.43.5.43h3.86c.25 0 .46-.18.5-.43l.36-2.55c.47-.2.9-.45 1.3-.75l2.4.96c.22.09.48 0 .6-.22l1.93-3.32a.5.5 0 0 0-.12-.64L19.4 13.5Z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="menu-best">
+        <span class="menu-best-label">best</span>
+        <span class="menu-best-value" id="menu-best-value">0</span>
+      </div>
+      <button id="btn-stats" class="icon-btn" aria-label="Stats">
+        <svg viewBox="0 0 24 24" width="20" height="20"><rect x="4" y="12" width="3.5" height="8" rx="0.8" fill="currentColor"/><rect x="10.2" y="7" width="3.5" height="13" rx="0.8" fill="currentColor"/><rect x="16.4" y="3" width="3.5" height="17" rx="0.8" fill="currentColor"/></svg>
+      </button>
+    </header>
 
-      if (met) {
-        Storage.unlockSkin(skin.id);
-        newlyUnlocked.push(skin);
-      }
-    }
-    return newlyUnlocked;
-  }
+    <div class="menu-mid">
+      <div class="menu-mark" id="menu-mark"></div>
+      <h1 class="menu-title">EMBER<span>FLIGHT</span></h1>
+      <p class="menu-tag">rise on the tap. fall in the dark.</p>
+    </div>
 
-  return { getAll, getById, getDefault, isUnlocked, checkUnlocks };
-})();
+    <div class="menu-bottom">
+      <div class="mode-list">
+        <button class="mode-card mode-card--primary" data-mode="classic">
+          <div class="mode-card-icon mode-icon-classic"></div>
+          <div class="mode-card-text">
+            <span class="mode-card-title">CLASSIC</span>
+            <span class="mode-card-sub">pure score run</span>
+          </div>
+          <span class="mode-card-go">PLAY</span>
+        </button>
+
+        <button class="mode-card" data-mode="ember">
+          <div class="mode-card-icon mode-icon-ember"></div>
+          <div class="mode-card-text">
+            <span class="mode-card-title">EMBER RUN</span>
+            <span class="mode-card-sub">sparks, gates &amp; surges</span>
+          </div>
+          <span class="mode-card-go">PLAY</span>
+        </button>
+      </div>
+
+      <button id="btn-skins" class="text-link">choose a mark &rsaquo;</button>
+    </div>
+  </section>
+
+  <!-- ============ SKIN PICKER ============ -->
+  <section id="screen-skins" class="screen screen-skins hidden">
+    <header class="sub-top">
+      <button class="icon-btn" id="skins-back" aria-label="Back">
+        <svg viewBox="0 0 24 24" width="20" height="20"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <span class="sub-title">YOUR MARK</span>
+      <span class="sub-spacer"></span>
+    </header>
+    <div class="skins-stage">
+      <button class="skins-arrow" id="skins-prev" aria-label="Previous">
+        <svg viewBox="0 0 24 24" width="22" height="22"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="skins-preview-wrap">
+        <canvas id="skins-canvas" width="240" height="240"></canvas>
+        <p class="skins-name" id="skins-name">EMBER</p>
+        <p class="skins-lock" id="skins-lock"></p>
+      </div>
+      <button class="skins-arrow" id="skins-next" aria-label="Next">
+        <svg viewBox="0 0 24 24" width="22" height="22"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+    </div>
+    <div class="skins-dots" id="skins-dots"></div>
+    <button class="primary-btn" id="skins-select">SELECT</button>
+  </section>
+
+  <!-- ============ SETTINGS ============ -->
+  <section id="screen-settings" class="screen screen-settings hidden">
+    <header class="sub-top">
+      <button class="icon-btn" id="settings-back" aria-label="Back">
+        <svg viewBox="0 0 24 24" width="20" height="20"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <span class="sub-title">SETTINGS</span>
+      <span class="sub-spacer"></span>
+    </header>
+    <div class="settings-list">
+      <div class="settings-row">
+        <span>Sound</span>
+        <button class="toggle" id="toggle-sound" data-on="true"><span class="toggle-knob"></span></button>
+      </div>
+      <div class="settings-row">
+        <span>Haptics</span>
+        <button class="toggle" id="toggle-haptics" data-on="true"><span class="toggle-knob"></span></button>
+      </div>
+      <div class="settings-row">
+        <span>Screen shake</span>
+        <button class="toggle" id="toggle-shake" data-on="true"><span class="toggle-knob"></span></button>
+      </div>
+      <div class="settings-row">
+        <span>Reduce motion</span>
+        <button class="toggle" id="toggle-reduced" data-on="false"><span class="toggle-knob"></span></button>
+      </div>
+      <button class="danger-link" id="btn-reset-data">Reset progress</button>
+    </div>
+  </section>
+
+  <!-- ============ STATS ============ -->
+  <section id="screen-stats" class="screen screen-stats hidden">
+    <header class="sub-top">
+      <button class="icon-btn" id="stats-back" aria-label="Back">
+        <svg viewBox="0 0 24 24" width="20" height="20"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <span class="sub-title">STATS</span>
+      <span class="sub-spacer"></span>
+    </header>
+    <div class="stats-grid" id="stats-grid"></div>
+  </section>
+
+  <!-- ============ COUNTDOWN (pre-run) ============ -->
+  <div id="screen-ready" class="screen screen-ready hidden">
+    <div class="ready-hint">
+      <div class="ready-tap-icon"></div>
+      <p>TAP TO RISE</p>
+    </div>
+  </div>
+
+  <!-- ============ PAUSE OVERLAY ============ -->
+  <section id="screen-pause" class="screen screen-pause hidden">
+    <div class="pause-card">
+      <h2>PAUSED</h2>
+      <button class="primary-btn" id="pause-resume">RESUME</button>
+      <button class="ghost-btn" id="pause-restart">RESTART</button>
+      <button class="ghost-btn" id="pause-menu">MAIN MENU</button>
+    </div>
+  </section>
+
+  <!-- ============ GAME OVER ============ -->
+  <section id="screen-over" class="screen screen-over hidden">
+    <div class="over-card">
+      <p class="over-eyebrow" id="over-eyebrow">RUN ENDED</p>
+      <div class="over-score-block">
+        <span class="over-score-label">SCORE</span>
+        <span class="over-score-value" id="over-score-value">0</span>
+      </div>
+      <div class="over-stats-row">
+        <div class="over-stat">
+          <span class="over-stat-label">BEST</span>
+          <span class="over-stat-value" id="over-best-value">0</span>
+        </div>
+        <div class="over-stat">
+          <span class="over-stat-label">RUNS</span>
+          <span class="over-stat-value" id="over-runs-value">0</span>
+        </div>
+      </div>
+      <p class="over-new-best hidden" id="over-new-best">NEW BEST</p>
+      <div class="over-actions">
+        <button class="icon-btn over-icon-btn" id="over-menu" aria-label="Main menu">
+          <svg viewBox="0 0 24 24" width="20" height="20"><path d="M4 11.5 12 4l8 7.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 10.5V20h12v-9.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+        </button>
+        <button class="primary-btn over-retry-btn" id="over-retry">RETRY</button>
+        <button class="icon-btn over-icon-btn" id="over-share" aria-label="Share score">
+          <svg viewBox="0 0 24 24" width="20" height="20"><circle cx="6" cy="12" r="2.2" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="18" cy="6" r="2.2" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="18" cy="18" r="2.2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M7.8 11l8.4-4M7.8 13l8.4 4" stroke="currentColor" stroke-width="1.4"/></svg>
+        </button>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<script src="js/utils.js"></script>
+<script src="js/physics-config.js"></script>
+<script src="js/storage.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/input.js"></script>
+<script src="js/skins.js"></script>
+<script src="js/particles.js"></script>
+<script src="js/player.js"></script>
+<script src="js/obstacles.js"></script>
+<script src="js/background.js"></script>
+<script src="js/game.js"></script>
+<script src="js/screens.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
